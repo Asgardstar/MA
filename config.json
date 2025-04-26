@@ -1,0 +1,43 @@
+{
+  "neo4j": {
+    "uri": "bolt://localhost:7687",
+    "username": "neo4j",
+    "password": "Sdfj203489fn249s",
+    "database": "neo4j"
+  },
+  "neo4j_agent": {
+    "uri": "bolt://localhost:7687",
+    "username": "llm_agent",
+    "password": "sd28!9fnd§8923v(",
+    "database": "neo4j"
+  },
+  "embedding": {
+    "provider": "sentence_transformers",
+    "model": "all-MiniLM-L6-v2",
+    "batch_size": 32,
+    "dimension" : 384
+  },
+  "llm_supervisor": {
+    "provider": "google",
+    "model": "gemini-2.0-flash",
+    "temperature": 0.2,
+    "max_tokens": null
+  },
+  "llm_searchagent": {
+    "provider": "google",
+    "model": "gemini-2.5-flash-preview-04-17",
+    "temperature": 0.2,
+    "max_tokens": null
+  },
+  "llm_simulationagent": {
+    "provider": "google",
+    "model": "gemini-2.0-flash",
+    "temperature": 0.2,
+    "max_tokens": null
+  },
+  "rag": {
+    "similarity_threshold": 0.7,
+    "top_k": 20,
+    "verbose": true
+  }
+}

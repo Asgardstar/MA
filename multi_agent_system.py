@@ -1,198 +1,321 @@
-from typing import TypedDict, Annotated, Sequence, Union, List, Dict, Any
-from langgraph.graph import StateGraph, END
+from typing import Annotated, Dict, Any, List, Literal
+from langgraph.prebuilt import InjectedState, create_react_agent
+from langgraph.graph import StateGraph, MessagesState
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain.tools import Tool, StructuredTool
+from prompts.supervisor_prompt import LANGGRAPH_SUPERVISOR_PROMPT
+from pydantic import BaseModel, Field
 import logging
+import json
 
-from utils.utils import get_session_id
-from agents.supervisor import SupervisorAgent
+from models.llm import get_llm
 from agents.search_agent import SearchAgent
 from agents.simulation_agent import SimulationAgent
 from tools.live_feedback import LiveFeedback
+from utils.utils import get_session_id
 
 logger = logging.getLogger(__name__)
 
 
-class AgentState(TypedDict):
-    messages: Sequence[BaseMessage]
-    next: str
-    current_agent: str
+class AgentState(MessagesState):
+    """Extended state to include our specific fields"""
     query: str
-    search_results: Dict[str, Any]
-    simulation_results: Dict[str, Any]
-    final_answer: str
-    formatted_answer: str
-    feedback: List[Dict[str, Any]]
-    error: str
-    session_id: str
-    intermediate_steps: List[Any]
+    search_results: Dict[str, Any] = {}
+    simulation_results: Dict[str, Any] = {}
+    final_answer: str = ""
+    formatted_answer: str = ""
+    feedback: List[Dict[str, Any]] = []
+    error: str = ""
+    session_id: str = ""
+    intermediate_steps: List[Any] = []
 
 
-class MultiAgentSystem:
+# Define input models for tools
+class SearchInput(BaseModel):
+    query: str = Field(description="The search query")
+
+
+class SimulationInput(BaseModel):
+    task: str = Field(description="The simulation task description")
+
+
+class FormatInput(BaseModel):
+    content: str = Field(description="The content to format")
+
+
+class LangGraphMultiAgentSystem:
     def __init__(self):
         self.feedback = LiveFeedback()
-        self.supervisor = SupervisorAgent()
+        # Initialize agents with proper names
         self.search_agent = SearchAgent()
         self.simulation_agent = SimulationAgent()
-        self.workflow = self._create_workflow()
 
-    def _create_workflow(self) -> StateGraph:
-        workflow = StateGraph(AgentState)
+        # Create tools from agents
+        self.tools = self._create_tools()
 
-        # Add nodes
-        workflow.add_node("supervisor", self.supervisor_node)
-        workflow.add_node("search_agent", self.search_agent_node)
-        workflow.add_node("simulation_agent", self.simulation_agent_node)
-        workflow.add_node("feedback", self.feedback_node)
+        # Create supervisor using ReAct agent
+        self.supervisor = self._create_supervisor()
 
-        # Set entry point
-        workflow.set_entry_point("supervisor")
+    def _create_tools(self) -> List[Tool]:
+        """Create tools from our agents that the supervisor can call"""
+        # Using structured tools for better parameter handling
+        return [
+            StructuredTool.from_function(
+                func=self._search_agent_tool,
+                name="search_knowledge_graph",
+                description="""
+                Search the knowledge graph for information about requirements, functions, 
+                solutions, products, and models. Use this when you need to find information
+                in the system's knowledge base.
+                Input: natural language query about what to search for.
+                """,
+                args_schema=SearchInput
+            ),
+            StructuredTool.from_function(
+                func=self._simulation_agent_tool,
+                name="run_simulation",
+                description="""
+                Run simulations using available models in the knowledge graph.
+                Use this for simulation-related tasks like accessing models,
+                executing simulations, or analyzing simulation results.
+                Input: description of the simulation task needed.
+                """,
+                args_schema=SimulationInput
+            ),
+            StructuredTool.from_function(
+                func=self._format_answer_tool,
+                name="format_final_answer",
+                description="""
+                Format the final answer in a user-friendly way using all collected information.
+                Use this when you have gathered all necessary information and need to present
+                the final response to the user.
+                Input: raw answer content to format.
+                """,
+                args_schema=FormatInput
+            )
+        ]
 
-        # Define transitions
-        workflow.add_conditional_edges(
-            "supervisor",
-            self.route_supervisor,
-            {
-                "search_agent": "search_agent",
-                "simulation_agent": "simulation_agent",
-                "END": END
+    def _search_agent_tool(self, query: str):
+        """Tool wrapper for search agent"""
+        self.feedback.send("🔍 Searching knowledge graph...")
+
+        try:
+            # Create state for search agent
+            search_state = {
+                "query": query,
+                "messages": []
             }
-        )
 
-        # Connect agents back to supervisor
-        workflow.add_edge("search_agent", "supervisor")
-        workflow.add_edge("simulation_agent", "supervisor")
+            # Run search agent
+            result = self.search_agent.process(search_state)
 
-        # Add feedback edges
-        workflow.add_edge("supervisor", "feedback")
-        workflow.add_edge("search_agent", "feedback")
-        workflow.add_edge("simulation_agent", "feedback")
-        workflow.add_edge("feedback", "supervisor")
+            # Extract results
+            search_results = result.get("search_results", {})
 
-        return workflow.compile()
+            # Make sure to return a clear indication of what was found
+            if search_results and search_results.get("findings"):
+                self.feedback.send(f"📊 Found {len(search_results['findings'])} results")
+                logger.info(f"Search results: {search_results}")
 
-    def route_supervisor(self, state: AgentState) -> str:
-        """Route based on supervisor's decision"""
-        next_action = state.get("next", "END")
-        logger.info(f"Supervisor routing to: {next_action}")
-        return next_action
+                # Store results in the shared feedback system to pass them along
+                self.feedback.search_results = search_results
 
-    def supervisor_node(self, state: AgentState) -> AgentState:
-        """Supervisor node logic"""
-        logger.info("Supervisor processing...")
-        self.feedback.send("🤔 Analyzing your request...")
-
-        try:
-            # Process the current state and decide next action
-            result = self.supervisor.process(state)
-            state.update(result)
-
-            # Provide feedback based on the decision
-            if state.get("next") == "search_agent":
-                self.feedback.send("🔍 Searching knowledge graph for relevant information...")
-            elif state.get("next") == "simulation_agent":
-                self.feedback.send("⚙️ Processing simulation request...")
-            elif state.get("next") == "END":
-                self.feedback.send("✅ Finalizing response...")
-
-            return state
-        except Exception as e:
-            logger.error(f"Error in supervisor: {str(e)}")
-            state["error"] = str(e)
-            state["next"] = "END"
-            state["formatted_answer"] = self.supervisor._format_error_message(str(e))
-            return state
-
-    def search_agent_node(self, state: AgentState) -> AgentState:
-        """Search agent node logic"""
-        logger.info("Search agent processing...")
-        self.feedback.send("🔎 Querying the knowledge graph...")
-
-        try:
-            result = self.search_agent.process(state)
-            state.update(result)
-
-            if result.get("search_results"):
-                self.feedback.send("📊 Found relevant information")
+                # Return a structured response
+                return f"Found {len(search_results['findings'])} results: {json.dumps(search_results, indent=2)}"
             else:
                 self.feedback.send("ℹ️ No relevant information found")
+                return "No relevant information found in the knowledge graph."
 
-            return state
         except Exception as e:
-            logger.error(f"Error in search agent: {str(e)}")
-            state["error"] = str(e)
-            return state
+            logger.error(f"Error in search tool: {str(e)}")
+            self.feedback.send(f"❌ Search error: {str(e)}", level="error")
+            return f"Error searching knowledge graph: {str(e)}"
 
-    def simulation_agent_node(self, state: AgentState) -> AgentState:
-        """Simulation agent node logic"""
-        logger.info("Simulation agent processing...")
-        self.feedback.send("🧮 Analyzing simulation requirements...")
+    def _simulation_agent_tool(self, task: str):
+        """Tool wrapper for simulation agent"""
+        self.feedback.send("⚙️ Processing simulation request...")
 
         try:
-            result = self.simulation_agent.process(state)
-            state.update(result)
+            # Create state for simulation agent
+            sim_state = {
+                "query": task,
+                "messages": [],
+                "search_results": getattr(self.feedback, 'search_results', {})  # Get previously stored results
+            }
 
-            if result.get("simulation_results"):
+            # Run simulation agent
+            result = self.simulation_agent.process(sim_state)
+
+            # Extract results
+            simulation_results = result.get("simulation_results", {})
+
+            if simulation_results:
                 self.feedback.send("✨ Simulation completed successfully")
+                logger.info(f"Simulation results: {simulation_results}")
+
+                # Store results in feedback system
+                self.feedback.simulation_results = simulation_results
+
+                # Return a structured response
+                return f"Simulation completed: {json.dumps(simulation_results, indent=2)}"
             else:
                 self.feedback.send("📋 Simulation analysis completed")
+                return "Simulation analysis completed without results."
 
-            return state
         except Exception as e:
-            logger.error(f"Error in simulation agent: {str(e)}")
-            state["error"] = str(e)
-            return state
+            logger.error(f"Error in simulation tool: {str(e)}")
+            self.feedback.send(f"❌ Simulation error: {str(e)}", level="error")
+            return f"Error running simulation: {str(e)}"
 
-    def feedback_node(self, state: AgentState) -> AgentState:
-        """Process and collect feedback"""
-        # This node just ensures feedback is tracked in state
-        if "feedback" not in state:
-            state["feedback"] = []
+    def _format_answer_tool(self, content: str):
+        """Tool wrapper for formatting final answer"""
+        self.feedback.send("✅ Formatting final response...")
 
-        # Add latest feedback to state
-        latest_feedback = self.feedback.get_latest()
-        if latest_feedback:
-            state["feedback"].extend(latest_feedback)
+        # Get all results from feedback system
+        search_results = getattr(self.feedback, 'search_results', {})
+        sim_results = getattr(self.feedback, 'simulation_results', {})
 
-        return state
+        # Parse content if it's a JSON string
+        try:
+            if content.startswith("{") or content.startswith("["):
+                content_data = json.loads(content)
+                if isinstance(content_data, dict):
+                    # Extract search results if they're in the content
+                    if "findings" in content_data:
+                        search_results = content_data
+                    elif "search_results" in content_data:
+                        search_results = content_data["search_results"]
+                    content = content_data.get("summary", content_data.get("message", str(content_data)))
+        except json.JSONDecodeError:
+            pass
+
+        # Create formatted answer
+        formatted = self._create_formatted_answer(content, search_results, sim_results)
+
+        # Store the formatted answer in feedback system
+        self.feedback.formatted_answer = formatted
+
+        return formatted
+
+    def _create_formatted_answer(self, content: str, search_results: Dict, sim_results: Dict) -> str:
+        """Create a well-formatted answer"""
+        sections = []
+
+        if content:
+            sections.append(content)
+
+        if search_results and search_results.get("findings"):
+            sections.append("\n## 🔍 Knowledge Graph Findings\n")
+            for finding in search_results["findings"]:
+                sections.append(f"- **Query**: {finding.get('query', '')}")
+                sections.append(f"  **Result**: {finding.get('result', '')}")
+                sections.append("")  # Add empty line for spacing
+
+        if sim_results and sim_results.get("executions"):
+            sections.append("\n## ⚙️ Simulation Results\n")
+            for execution in sim_results["executions"]:
+                sections.append(f"- **Type**: {execution.get('type', '')}")
+                sections.append(f"  **Result**: {execution.get('result', '')}")
+                sections.append("")  # Add empty line for spacing
+
+        return "\n".join(sections)
+
+    def _create_supervisor(self):
+        """Create supervisor using ReAct agent"""
+        llm = get_llm("supervisor")
+
+        # Create ReAct agent with system prompt
+        return create_react_agent(
+            model=llm,
+            tools=self.tools,
+            state_modifier=LANGGRAPH_SUPERVISOR_PROMPT
+        )
 
     def run(self, query: str, session_id: str = None) -> Dict[str, Any]:
-        """Run the multi-agent system"""
+        """Run the multi-agent system using LangGraph"""
         if not session_id:
             session_id = get_session_id()
 
+        # Initialize state - notice we now use a simple dictionary
         initial_state = {
             "messages": [HumanMessage(content=query)],
             "query": query,
-            "current_agent": "supervisor",
             "session_id": session_id,
+            "search_results": {},
+            "simulation_results": {},
+            "formatted_answer": "",
             "feedback": [],
             "intermediate_steps": []
         }
 
         try:
             self.feedback.send(f"🚀 Processing query: {query}")
-            result = self.workflow.invoke(initial_state)
 
-            # Get the final formatted answer from the supervisor
-            final_response = result.get("formatted_answer", result.get("final_answer", "No response generated"))
+            # Clear previous results from feedback system
+            if hasattr(self.feedback, 'search_results'):
+                delattr(self.feedback, 'search_results')
+            if hasattr(self.feedback, 'simulation_results'):
+                delattr(self.feedback, 'simulation_results')
+            if hasattr(self.feedback, 'formatted_answer'):
+                delattr(self.feedback, 'formatted_answer')
+
+            # Run supervisor with ReAct agent
+            result = self.supervisor.invoke(initial_state)
+
+            # Extract final answer
+            final_response = getattr(self.feedback, 'formatted_answer', "")
+
+            if not final_response:
+                # Try to extract from messages if formatted_answer not set
+                for msg in reversed(result.get("messages", [])):
+                    if isinstance(msg, AIMessage):
+                        final_response = msg.content
+                        break
+
+            if not final_response:
+                final_response = "I couldn't generate a response. Please try rephrasing your question."
+
+            # Get the stored results
+            search_results = getattr(self.feedback, 'search_results', {})
+            simulation_results = getattr(self.feedback, 'simulation_results', {})
 
             return {
                 "response": final_response,
-                "feedback": result.get("feedback", []),
-                "search_results": result.get("search_results"),
-                "simulation_results": result.get("simulation_results"),
-                "error": result.get("error")
+                "feedback": self.feedback.get_all(),
+                "search_results": search_results,
+                "simulation_results": simulation_results,
+                "error": None
             }
+
         except Exception as e:
             logger.error(f"Error in multi-agent system: {str(e)}")
             return {
-                "response": self.supervisor._format_error_message(str(e)),
+                "response": self._format_error_message(str(e)),
                 "feedback": self.feedback.get_all(),
                 "error": str(e)
             }
 
+    def _format_error_message(self, error: str) -> str:
+        """Format error messages for users"""
+        return f"""
+## ❌ Error Occurred
+
+I encountered an error while processing your request:
+
+```
+{error}
+```
+
+**What you can do:**
+1. Try rephrasing your question
+2. Provide more specific details
+3. Check if all required information is available
+
+If the problem persists, please contact support.
+"""
+
 
 # Factory function
-def create_multi_agent_system() -> MultiAgentSystem:
-    """Create and return a configured multi-agent system"""
-    return MultiAgentSystem()
+def create_langgraph_multi_agent_system() -> LangGraphMultiAgentSystem:
+    """Create and return a LangGraph-based multi-agent system"""
+    return LangGraphMultiAgentSystem()

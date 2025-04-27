@@ -1,17 +1,16 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 import streamlit as st
-from utils.utils import write_message
-from multi_agent_system import create_multi_agent_system
+from multi_agent_system import create_langgraph_multi_agent_system
 from tools.live_feedback import get_feedback, FeedbackDisplay
-import time
 
 # Page Config
 st.set_page_config("AI Engineering Crew", layout="wide")
 
-# Initialize the multi-agent system
+# Initialize the multi-agent system with LangGraph
 if "multi_agent_system" not in st.session_state:
-    st.session_state.multi_agent_system = create_multi_agent_system()
+    st.session_state.multi_agent_system = create_langgraph_multi_agent_system()
 
 # Initialize feedback system
 feedback = get_feedback()
@@ -30,22 +29,28 @@ with col1:
 
     # Display messages in Session State
     for message in st.session_state.messages:
-        write_message(message['role'], message['content'], save=False)
+        if message['role'] == 'user':
+            with st.chat_message('user'):
+                st.markdown(message['content'])
+        else:
+            with st.chat_message('assistant'):
+                st.markdown(message['content'])
 
-    # Chat input at the bottom
+    # Chat input
     if prompt := st.chat_input("What is up?"):
-        # Display user message
-        write_message('user', prompt)
+        # Display user message directly
+        with st.chat_message('user'):
+            st.markdown(prompt)
+
+        # Add to messages
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
         # Clear previous feedback and reset timer
         feedback.clear()
         feedback.reset_timer()
 
-        # Create placeholder for assistant response
+        # Create container for assistant response
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-
-            # Run the multi-agent system
             with st.spinner('Engineering...'):
                 try:
                     # Get response from multi-agent system
@@ -53,10 +58,10 @@ with col1:
 
                     # Display the response
                     response = result.get("response", "We couldn't process your request. AI won't replace you yet.")
-                    message_placeholder.markdown(response)
+                    st.markdown(response)
 
-                    # Save the response
-                    write_message('assistant', response, save=True)
+                    # Save the response to messages
+                    st.session_state.messages.append({"role": "assistant", "content": response})
 
                     # If there's an error, display it
                     if result.get("error"):
@@ -64,27 +69,34 @@ with col1:
 
                 except Exception as e:
                     error_message = f"An error occurred: {str(e)}"
-                    message_placeholder.markdown(error_message)
-                    write_message('assistant', error_message, save=True)
+                    st.markdown(error_message)
+                    st.session_state.messages.append({"role": "assistant", "content": error_message})
                     st.error(error_message)
+
+        # Force a rerun to update the feedback panel
+        st.rerun()
 
 with col2:
     # Create a container for feedback that updates
     feedback_container = st.empty()
 
-    # Create a loop to update feedback display
-    if st.session_state.get("processing", False):
-        while st.session_state.processing:
-            with feedback_container.container():
-                FeedbackDisplay.display_feedback_panel(feedback)
-            time.sleep(0.5)
-    else:
-        with feedback_container.container():
-            FeedbackDisplay.display_feedback_panel(feedback)
+    # Display feedback
+    with feedback_container.container():
+        FeedbackDisplay.display_feedback_panel(feedback)
 
     # Add timeline view
     with st.expander("View Activity Timeline", expanded=False):
         FeedbackDisplay.create_activity_timeline(feedback)
+
+    # Add agent activity monitor specific to LangGraph
+    st.markdown("### 🤖 Agent Activity")
+    st.markdown("""
+    **Current Architecture:**
+    - LangGraph ReAct Agent (Supervisor)
+    - Search Agent (Tool)
+    - Simulation Agent (Tool)
+    - Response Formatter (Tool)
+    """)
 
 # Add a sidebar with system controls
 with st.sidebar:
@@ -102,11 +114,13 @@ with st.sidebar:
 
     st.markdown("### ℹ️ System Info")
     st.markdown("""
-    This chatbot uses a multi-agent system:
-    - **Supervisor**: Routes queries
-    - **Search Agent**: Queries knowledge graph
-    - **Simulation Agent**: Manages simulations
-    - **Response Agent**: Formats responses
+    This chatbot uses LangGraph multi-agent system:
+    - **Supervisor**: ReAct agent that orchestrates
+    - **Search Tool**: Queries knowledge graph
+    - **Simulation Tool**: Manages simulations
+    - **Formatter Tool**: Formats responses
+
+    The supervisor decides which tools to use based on the query.
     """)
 
     # Show current configuration
@@ -116,6 +130,16 @@ with st.sidebar:
 
         config = load_config()
         st.json(config)
+
+    # Add LangGraph-specific monitoring
+    with st.expander("LangGraph Status"):
+        if st.session_state.get("multi_agent_system"):
+            st.markdown("✅ LangGraph system initialized")
+            st.markdown("### Available Tools:")
+            for tool in st.session_state.multi_agent_system.tools:
+                st.markdown(f"- {tool.name}")
+        else:
+            st.markdown("⚠️ System not initialized")
 
 # Add custom CSS for better styling
 st.markdown("""
@@ -130,6 +154,17 @@ st.markdown("""
     }
     div[data-testid="stHorizontalBlock"] {
         gap: 2rem;
+    }
+    /* LangGraph-specific styling */
+    .langgraph-step {
+        border-left: 3px solid #4CAF50;
+        padding-left: 10px;
+        margin: 5px 0;
+    }
+    .tool-call {
+        border-left: 3px solid #2196F3;
+        padding-left: 10px;
+        margin: 5px 0;
     }
 </style>
 """, unsafe_allow_html=True)

@@ -18,10 +18,8 @@ class SearchAgent:
         self.agent = self._create_agent()
         self.agent_executor = self._create_executor()
 
-
     def _create_tools(self):
         """Create tools for the search agent"""
-        # Create the semantic cypher search tool
         semantic_tool = Tool(
             name="semantic_cypher_search",
             func=semantic_cypher_search,
@@ -37,7 +35,6 @@ class SearchAgent:
             Input should be a natural language query.
             """
         )
-
         return [semantic_tool]
 
     def _create_agent(self):
@@ -60,7 +57,7 @@ class SearchAgent:
         )
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Process the search request"""
+        """Process the search request in a simplified way for tool integration"""
         query = state.get("query", "")
 
         try:
@@ -77,22 +74,20 @@ class SearchAgent:
             # Parse the results
             search_results = self._parse_search_results(output, intermediate_steps)
 
-            # Update state
-            state["search_results"] = search_results
-            state["messages"].append(AIMessage(content=f"Search Agent: {output}"))
+            logger.info(f"Search agent completed with {len(search_results.get('findings', []))} results")
 
-            # Add intermediate steps for feedback
-            if intermediate_steps:
-                state.setdefault("intermediate_steps", []).extend(intermediate_steps)
-
-            logger.info(f"Search agent completed with {len(search_results)} results")
-
-            return state
+            return {
+                "search_results": search_results,
+                "raw_output": output,
+                "intermediate_steps": intermediate_steps
+            }
 
         except Exception as e:
             logger.error(f"Error in search agent: {str(e)}")
-            state["error"] = f"Search error: {str(e)}"
-            return state
+            return {
+                "error": f"Search error: {str(e)}",
+                "search_results": None
+            }
 
     def _parse_search_results(self, output: str, intermediate_steps: list) -> Dict[str, Any]:
         """Parse search results from the agent output"""

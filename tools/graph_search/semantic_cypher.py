@@ -1,3 +1,4 @@
+# tools/graph_search/semantic_cypher.py
 import logging
 from typing import Dict, Any, List
 from langchain_neo4j import GraphCypherQAChain
@@ -40,7 +41,7 @@ def semantic_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
 
     query_embedding = embedding_model.encode(query).tolist()
 
-    cypher_query = f'''
+    cypher_query = '''
     MATCH (n)
     WITH n, vector.similarity.cosine(n.description_embedding, $queryEmbedding) AS score
     WHERE score > $threshold
@@ -93,6 +94,7 @@ def format_semantic_results(results: List[Dict[str, Any]]) -> str:
 
     return formatted
 
+
 def semantic_cypher_search(query: str) -> str:
     logger.info(f"Processing query: {query}")
 
@@ -105,7 +107,9 @@ def semantic_cypher_search(query: str) -> str:
     formatted_semantic_results = format_semantic_results(semantic_results)
 
     cypher_prompt = PromptTemplate.from_template(CYPHER_GENERATION_TEMPLATE)
-    llm = get_llm()
+
+    # Fixed: Pass agent name to get_llm
+    llm = get_llm("searchagent")  # or whatever agent name is appropriate for search
     graph = get_agent_graph()
 
     logger.info("Initializing GraphCypherQAChain")
@@ -115,7 +119,7 @@ def semantic_cypher_search(query: str) -> str:
         verbose=rag_config.get("verbose", True),
         cypher_prompt=cypher_prompt,
         allow_dangerous_requests=True,
-        top_k = 100,
+        top_k=100,
     )
 
     try:
@@ -132,7 +136,6 @@ def semantic_cypher_search(query: str) -> str:
         # Log the error and try to recover
         logger.error(f"Cypher syntax error: {str(e)}")
         error_message = f"I encountered an error in the database query: {str(e)}\n\n"
-
         return error_message
 
     except Exception as e:

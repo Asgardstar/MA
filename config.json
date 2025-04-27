@@ -2,13 +2,11 @@
   "neo4j": {
     "uri": "bolt://localhost:7687",
     "username": "neo4j",
-    "password": "Sdfj203489fn249s",
     "database": "neo4j"
   },
   "neo4j_agent": {
     "uri": "bolt://localhost:7687",
     "username": "llm_agent",
-    "password": "sd28!9fnd§8923v(",
     "database": "neo4j"
   },
   "embedding": {

@@ -1,3 +1,5 @@
+# tools/live_feedback.py
+# Enhanced version with LangGraph-specific feedback
 import streamlit as st
 from typing import List, Dict, Any
 from datetime import datetime
@@ -31,19 +33,30 @@ class LiveFeedback:
         self.max_history = 100
         self.start_time = datetime.now()
 
-    def send(self, message: str, agent: str = None, level: str = "info"):
-        """Send feedback to the UI"""
+        # LangGraph-specific tracking
+        self.tool_calls = []
+        self.reasoning_steps = []
+
+    def send(self, message: str, agent: str = None, level: str = "info", step_type: str = None):
+        """Send feedback to the UI with enhanced LangGraph support"""
         timestamp = datetime.now()
         feedback_item = {
             "timestamp": timestamp.isoformat(),
             "elapsed": (timestamp - self.start_time).total_seconds(),
             "agent": agent,
             "message": message,
-            "level": level
+            "level": level,
+            "step_type": step_type  # New field for LangGraph steps
         }
 
         self.feedback_queue.put(feedback_item)
         self.feedback_history.append(feedback_item)
+
+        # Track specific types of steps
+        if step_type == "tool_call":
+            self.tool_calls.append(feedback_item)
+        elif step_type == "reasoning":
+            self.reasoning_steps.append(feedback_item)
 
         # Trim history if needed
         if len(self.feedback_history) > self.max_history:
@@ -66,9 +79,19 @@ class LiveFeedback:
         """Get all feedback history"""
         return self.feedback_history.copy()
 
+    def get_tool_calls(self) -> List[Dict[str, Any]]:
+        """Get all tool call feedback"""
+        return self.tool_calls.copy()
+
+    def get_reasoning_steps(self) -> List[Dict[str, Any]]:
+        """Get all reasoning step feedback"""
+        return self.reasoning_steps.copy()
+
     def clear(self):
         """Clear feedback history"""
         self.feedback_history.clear()
+        self.tool_calls.clear()
+        self.reasoning_steps.clear()
         while not self.feedback_queue.empty():
             try:
                 self.feedback_queue.get_nowait()
@@ -85,7 +108,7 @@ class FeedbackDisplay:
 
     @staticmethod
     def display_feedback_panel(feedback: LiveFeedback, container=None):
-        """Display feedback panel in Streamlit"""
+        """Display feedback panel in Streamlit with LangGraph enhancements"""
         if container is None:
             container = st.container()
 
@@ -101,23 +124,39 @@ class FeedbackDisplay:
                     elapsed = item.get("elapsed", 0)
                     message = item.get("message", "")
                     level = item.get("level", "info")
+                    step_type = item.get("step_type", "general")
 
-                    # Format the message with color based on level
+                    # Format based on step type
+                    if step_type == "tool_call":
+                        style_class = "tool-call"
+                        icon = "🛠️"
+                    elif step_type == "reasoning":
+                        style_class = "langgraph-step"
+                        icon = "🧠"
+                    else:
+                        style_class = ""
+                        # Level-based icons
+                        if level == "error":
+                            icon = "❌"
+                        elif level == "warning":
+                            icon = "⚠️"
+                        elif level == "success":
+                            icon = "✅"
+                        else:
+                            icon = "ℹ️"
+
+                    # Choose color based on level
                     if level == "error":
                         color = "red"
-                        icon = "❌"
                     elif level == "warning":
                         color = "orange"
-                        icon = "⚠️"
                     elif level == "success":
                         color = "green"
-                        icon = "✅"
                     else:
                         color = "blue"
-                        icon = "ℹ️"
 
                     st.markdown(
-                        f'<div style="padding: 5px; border-left: 3px solid {color}; margin: 5px 0;">'
+                        f'<div class="{style_class}" style="border-left: 3px solid {color}; padding: 5px; margin: 5px 0;">'
                         f'<small style="color: gray;">[{elapsed:.1f}s] {agent}</small><br>'
                         f'{icon} {message}'
                         f'</div>',
@@ -128,7 +167,7 @@ class FeedbackDisplay:
 
     @staticmethod
     def create_activity_timeline(feedback: LiveFeedback):
-        """Create a visual timeline of activities"""
+        """Create a visual timeline of activities with LangGraph insights"""
         history = feedback.get_all()
 
         if not history:
@@ -137,6 +176,15 @@ class FeedbackDisplay:
 
         # Create timeline visualization
         st.markdown("### 📊 Activity Timeline")
+
+        # Show LangGraph-specific metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Steps", len(history))
+        with col2:
+            st.metric("Tool Calls", len(feedback.get_tool_calls()))
+        with col3:
+            st.metric("Reasoning Steps", len(feedback.get_reasoning_steps()))
 
         # Group by agent
         agents = {}
@@ -150,28 +198,34 @@ class FeedbackDisplay:
         for agent, items in agents.items():
             st.markdown(f"**{agent}**")
 
-            # Create a simple progress bar for each agent's activities
             times = [item["elapsed"] for item in items]
             if times:
                 min_time = min(times)
                 max_time = max(times)
 
-                # Create a simple timeline visualization
-                timeline_data = []
+                # Create timeline
                 for item in items:
                     elapsed = item["elapsed"]
-                    normalized = (elapsed - min_time) / (max_time - min_time) if max_time > min_time else 0
-                    timeline_data.append({
-                        "time": elapsed,
-                        "position": normalized,
-                        "message": item["message"][:30] + "..." if len(item["message"]) > 30 else item["message"]
-                    })
+                    step_type = item.get("step_type", "general")
 
-                # Simple text-based timeline
-                for data in timeline_data:
-                    bar_length = int(data["position"] * 50)
+                    if max_time > min_time:
+                        normalized = (elapsed - min_time) / (max_time - min_time)
+                    else:
+                        normalized = 0
+
+                    bar_length = int(normalized * 50)
                     bar = "█" * bar_length + "░" * (50 - bar_length)
-                    st.text(f"{data['time']:.1f}s |{bar}| {data['message']}")
+
+                    # Add step type indicator
+                    if step_type == "tool_call":
+                        indicator = "🛠️"
+                    elif step_type == "reasoning":
+                        indicator = "🧠"
+                    else:
+                        indicator = "•"
+
+                    message = item["message"][:50] + "..." if len(item["message"]) > 50 else item["message"]
+                    st.text(f"{elapsed:.1f}s {indicator} |{bar}| {message}")
 
             st.markdown("---")
 

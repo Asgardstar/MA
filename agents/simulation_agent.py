@@ -20,13 +20,18 @@ class SimulationAgent:
         self.agent = self._create_agent()
         self.agent_executor = self._create_executor()
 
-
     def _create_tools(self):
         """Create tools for the simulation agent"""
+
+        # Wrapper function to make access_all_simulation_models accept an argument
+        def access_models_wrapper(dummy_input: str = ""):
+            """Wrapper to make access_all_simulation_models work as a tool"""
+            return access_all_simulation_models()
+
         tools = [
             Tool(
                 name="access_simulation_models",
-                func=access_all_simulation_models,
+                func=access_models_wrapper,
                 description="""
                 Access all simulation models in the knowledge graph.
                 Returns information for each model including:
@@ -34,7 +39,7 @@ class SimulationAgent:
                 - Required inputs and outputs
                 - Current inputs/outputs stored in the knowledge graph
                 - Input/output details (name, description, format, values, units)
-                No input required.
+                No input required - just call this tool to get all models.
                 """
             ),
             Tool(
@@ -59,7 +64,6 @@ class SimulationAgent:
                 """
             )
         ]
-
         return tools
 
     def _create_agent(self):
@@ -82,7 +86,7 @@ class SimulationAgent:
         )
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Process the simulation request"""
+        """Process the simulation request in a simplified way for tool integration"""
         query = state.get("query", "")
         context = self._build_context(state)
 
@@ -101,22 +105,20 @@ class SimulationAgent:
             # Parse the results
             simulation_results = self._parse_simulation_results(output, intermediate_steps)
 
-            # Update state
-            state["simulation_results"] = simulation_results
-            state["messages"].append(AIMessage(content=f"Simulation Agent: {output}"))
-
-            # Add intermediate steps for feedback
-            if intermediate_steps:
-                state.setdefault("intermediate_steps", []).extend(intermediate_steps)
-
             logger.info("Simulation agent completed processing")
 
-            return state
+            return {
+                "simulation_results": simulation_results,
+                "raw_output": output,
+                "intermediate_steps": intermediate_steps
+            }
 
         except Exception as e:
             logger.error(f"Error in simulation agent: {str(e)}")
-            state["error"] = f"Simulation error: {str(e)}"
-            return state
+            return {
+                "error": f"Simulation error: {str(e)}",
+                "simulation_results": None
+            }
 
     def _build_context(self, state: Dict[str, Any]) -> str:
         """Build context from the current state"""

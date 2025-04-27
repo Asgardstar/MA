@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 from sentence_transformers import SentenceTransformer
 import neo4j
 from neo4j import Query
@@ -63,7 +65,7 @@ def main():
 
     # Create vector index if it doesn't exist
     try:
-        vector_query = Query('''
+        vector_query = '''
         CREATE VECTOR INDEX IF NOT EXISTS nodeDescription
         FOR (n:node)
         ON n.description_embedding
@@ -71,11 +73,11 @@ def main():
             `vector.dimensions`: $dimension,
             `vector.similarity_function`: 'cosine'
         }}
-        ''')
+        '''
 
         driver.execute_query(
             vector_query,
-            parameters={"dimension": dimension},
+            dimension=dimension,  # Pass parameters directly as keyword arguments
             database_=db_name
         )
         print("Vector index created or already exists.")
@@ -84,8 +86,7 @@ def main():
 
     # Import complete, show counters
     records, _, _ = driver.execute_query(
-        Query(
-            'MATCH (n WHERE n.description_embedding IS NOT NULL) RETURN count(*) AS countNodesWithEmbeddings, size(n.description_embedding) AS embeddingSize'),
+        'MATCH (n WHERE n.description_embedding IS NOT NULL) RETURN count(*) AS countNodesWithEmbeddings, size(n.description_embedding) AS embeddingSize',
         database_=db_name
     )
 
@@ -98,15 +99,16 @@ Embedding size: {records[0].get('embeddingSize')}.
 
 def import_batch(driver, nodes_with_embeddings, batch_n):
     # Add embeddings to nodes
-    update_query = Query('''
+    update_query = '''
     UNWIND $nodes AS node
     MATCH (n) WHERE elementId(n) = node.elementId
     SET n.description_embedding = node.embedding
-    ''')
+    '''
 
+    # Execute the query without wrapping it in Query object
     driver.execute_query(
         update_query,
-        parameters={"nodes": nodes_with_embeddings},
+        nodes=nodes_with_embeddings,  # Pass parameters directly as keyword arguments
         database_=db_name
     )
 

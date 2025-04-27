@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import neo4j
 from neo4j import Query
 from utils.utils import load_config
@@ -14,7 +16,7 @@ db_name = neo4j_config.get("database", "")
 
 embedding_config = config.get("embedding", {})
 dimension = embedding_config.get("dimension", {})
-
+print(dimension)
 def create_vector_index():
     driver = neo4j.GraphDatabase.driver(uri, auth=auth)
     driver.verify_connectivity()
@@ -35,9 +37,10 @@ def create_vector_index():
 
         driver.execute_query(
             vector_query,
-            parameters={"dimension": dimension},
+            dimension= dimension,
             database_=db_name
         )
+
         print("Vector index created successfully.")
 
     except Exception as e:

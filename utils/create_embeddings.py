@@ -1,19 +1,13 @@
-from dotenv import load_dotenv
-load_dotenv()
 from sentence_transformers import SentenceTransformer
 import neo4j
 from neo4j import Query
 from utils.utils import load_config
-import os
 
 # Load configuration
-NEO4J_ADMIN = os.getenv('NEO4J_ADMIN')
-
-# Database connection credentials
 config = load_config()
 neo4j_config = config.get("neo4j", {})
 uri = neo4j_config.get("uri", "")
-auth = (neo4j_config.get("username", ""), NEO4J_ADMIN)
+auth = (neo4j_config.get("username", ""), neo4j_config.get("password", ""))
 db_name = neo4j_config.get("database", "")
 
 # Get embedding configuration
@@ -63,30 +57,12 @@ def main():
         if nodes_with_embeddings:
             import_batch(driver, nodes_with_embeddings, batch_n)
 
-    # Create vector index if it doesn't exist
-    try:
-        vector_query = '''
-        CREATE VECTOR INDEX IF NOT EXISTS nodeDescription
-        FOR (n:node)
-        ON n.description_embedding
-        OPTIONS {indexConfig: {
-            `vector.dimensions`: $dimension,
-            `vector.similarity_function`: 'cosine'
-        }}
-        '''
 
-        driver.execute_query(
-            vector_query,
-            dimension=dimension,  # Pass parameters directly as keyword arguments
-            database_=db_name
-        )
-        print("Vector index created or already exists.")
-    except Exception as e:
-        print(f"Error creating vector index: {e}")
 
     # Import complete, show counters
     records, _, _ = driver.execute_query(
-        'MATCH (n WHERE n.description_embedding IS NOT NULL) RETURN count(*) AS countNodesWithEmbeddings, size(n.description_embedding) AS embeddingSize',
+        Query(
+            'MATCH (n WHERE n.description_embedding IS NOT NULL) RETURN count(*) AS countNodesWithEmbeddings, size(n.description_embedding) AS embeddingSize'),
         database_=db_name
     )
 
@@ -99,16 +75,15 @@ Embedding size: {records[0].get('embeddingSize')}.
 
 def import_batch(driver, nodes_with_embeddings, batch_n):
     # Add embeddings to nodes
-    update_query = '''
+    update_query = Query('''
     UNWIND $nodes AS node
     MATCH (n) WHERE elementId(n) = node.elementId
     SET n.description_embedding = node.embedding
-    '''
+    ''')
 
-    # Execute the query without wrapping it in Query object
     driver.execute_query(
         update_query,
-        nodes=nodes_with_embeddings,  # Pass parameters directly as keyword arguments
+        parameters={"nodes": nodes_with_embeddings},
         database_=db_name
     )
 

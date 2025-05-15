@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Load configuration
 NEO4J_ADMIN = os.getenv('NEO4J_ADMIN')
-NEO4J_SEARCHAGENT = os.getenv('NEO4J_SEARCHAGENT')
+NEO4J_SEARCHAGENT = os.getenv('NEO4J_AGENT')
 config = load_config()
 
 

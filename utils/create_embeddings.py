@@ -1,13 +1,19 @@
+from dotenv import load_dotenv
+
+load_dotenv()
 from sentence_transformers import SentenceTransformer
 import neo4j
 from neo4j import Query
 from utils.utils import load_config
 
+import os
+password = os.getenv("NEO4J_ADMIN")
+
 # Load configuration
 config = load_config()
 neo4j_config = config.get("neo4j", {})
 uri = neo4j_config.get("uri", "")
-auth = (neo4j_config.get("username", ""), neo4j_config.get("password", ""))
+auth = (neo4j_config.get("username", ""), password)
 db_name = neo4j_config.get("database", "")
 
 # Get embedding configuration
@@ -83,7 +89,8 @@ def import_batch(driver, nodes_with_embeddings, batch_n):
 
     driver.execute_query(
         update_query,
-        parameters={"nodes": nodes_with_embeddings},
+        #parameters={"nodes": nodes_with_embeddings},
+        nodes = nodes_with_embeddings,
         database_=db_name
     )
 

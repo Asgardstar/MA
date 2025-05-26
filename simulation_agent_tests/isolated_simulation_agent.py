@@ -7,8 +7,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage
 
 # --- Path Setup ---
-# Add the project root directory (asgardstar/ma) to the Python path
-# This allows a_s_t to find modules like 'agents', 'tools', etc.
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -24,7 +23,7 @@ except ImportError as e:
 
 # --- Logging Configuration ---
 logging.basicConfig(
-    level=logging.INFO, # Set to DEBUG for more verbose Langchain output
+    level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(name)s - %(module)s.%(funcName)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -32,6 +31,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- ANSI Color Codes ---
+GREEN = '\033[92m'
+RESET_COLOR = '\033[0m'
 
 # --- Environment Variables ---
 dotenv_path = os.path.join(PROJECT_ROOT, '.env')
@@ -43,62 +45,63 @@ else:
 
 def interactive_chat(agent: SimulationAgent):
     """
-    Manages an interactive chat session with the SimulationAgent.
+    Manages an interactive chat session with the SimulationAgent,
+    with colored output for user and agent messages.
     """
     chat_history = []
-    print("\n--- Starting Interactive Chat with SimulationAgent ---")
+    # Initial agent message in green
+    initial_agent_message = "Hello! How can I help you with simulations today?"
+    print(f"\n--- Starting Interactive Chat with SimulationAgent ---")
     print("Type 'exit' or 'quit' to end the chat.")
-    print("Agent: Hello! How can I help you with simulations today?")
-    chat_history.append(AIMessage(content="Hello! How can I help you with simulations today?"))
+    print(f"{GREEN}Agent: {initial_agent_message}{RESET_COLOR}")
+    chat_history.append(AIMessage(content=initial_agent_message))
 
     while True:
         try:
-            current_query = input("You: ")
+            # Get user input
+            raw_user_input = input(f"{GREEN}You: {RESET_COLOR}") 
+            current_query = raw_user_input
+
             if current_query.lower() in ["exit", "quit"]:
-                print("Agent: Goodbye! Stopping MATLAB engine if active...")
+                print(f"{GREEN}Agent: Goodbye! Stopping MATLAB engine if active...{RESET_COLOR}")
                 try:
                     stop_matlab_engine()
                 except Exception as e_stop:
                     logger.error(f"Error stopping MATLAB engine: {e_stop}")
-                print("Agent: Chat ended.")
+                print(f"{GREEN}Agent: Chat ended.{RESET_COLOR}")
                 break
 
             if not current_query.strip():
                 continue
 
-            # The 'messages' for the agent state should include the full history plus the current query
-            # The agent expects the current user message to be the last one in the list for processing
             current_turn_messages_for_agent = chat_history + [HumanMessage(content=current_query)]
 
             state = {
-                "query": current_query, # The most recent query from the user for this turn
+                "query": current_query,
                 "messages": current_turn_messages_for_agent,
-                # 'context' can be added if needed, e.g., from a previous search agent
             }
 
+            # Logging remains uncolored for clarity in log files
             logger.info(f"\n--- Sending to SimulationAgent ---")
             logger.info(f"Current Query: {current_query}")
             logger.debug(f"Full message history for agent: {current_turn_messages_for_agent}")
             logger.info("-------------------------------")
 
-            # Add user message to persistent chat_history for the next turn
             chat_history.append(HumanMessage(content=current_query))
 
             result = agent.process(state)
             final_answer = result.get('final_answer', "Agent did not provide a final answer.")
             simulation_results_if_any = result.get('simulation_results_if_any')
 
-            print(f"Agent: {final_answer}")
-            chat_history.append(AIMessage(content=final_answer)) # Add agent's response to history
+            print(f"{GREEN}Agent: {final_answer}{RESET_COLOR}")
+            chat_history.append(AIMessage(content=final_answer))
 
             if result.get('error'):
                 logger.error(f"Agent Error: {result.get('error')}")
             if simulation_results_if_any:
                 logger.info(f"Simulation Execution Data from this turn: {simulation_results_if_any}")
 
-            # Log intermediate steps if verbose logging for the agent_executor is off
-            # but you still want to see them from the returned result.
-            if logger.level <= logging.DEBUG: # or a specific flag
+            if logger.level <= logging.DEBUG:
                 raw_agent_output = result.get('raw_output_from_agent_executor', {})
                 intermediate_steps = raw_agent_output.get('intermediate_steps', [])
                 if intermediate_steps:
@@ -107,10 +110,10 @@ def interactive_chat(agent: SimulationAgent):
                         logger.debug(f"  Step {i+1}:")
                         logger.debug(f"    Tool: {action.tool}")
                         logger.debug(f"    Tool Input: {action.tool_input}")
-                        logger.debug(f"    Observation: {str(observation)[:1000]}...") # Log a snippet
+                        logger.debug(f"    Observation: {str(observation)[:1000]}...")
 
         except KeyboardInterrupt:
-            print("\nAgent: Chat interrupted by user. Goodbye! Stopping MATLAB engine if active...")
+            print(f"\n{GREEN}Agent: Chat interrupted by user. Goodbye! Stopping MATLAB engine if active...{RESET_COLOR}")
             try:
                 stop_matlab_engine()
             except Exception as e_stop:
@@ -118,15 +121,11 @@ def interactive_chat(agent: SimulationAgent):
             break
         except Exception as e:
             logger.error(f"Unexpected error during interactive chat: {e}", exc_info=True)
-            print("Agent: I encountered an unexpected issue. Please try again.")
-            # Optionally, decide if you want to clear chat_history or try to recover
+            print(f"{GREEN}Agent: I encountered an unexpected issue. Please try again.{RESET_COLOR}")
 
 if __name__ == "__main__":
-    logger.info("--- Starting Isolated SimulationAgent Test (Interactive Mode) ---")
+    logger.info("--- Starting Isolated SimulationAgent Test ---")
     try:
-        # Make sure to set verbose=False in SimulationAgent's AgentExecutor
-        # if you want to rely on the logger.debug for intermediate steps here
-        # and not have double verbose output.
         simulation_agent_instance = SimulationAgent()
         logger.info("SimulationAgent instantiated successfully.")
     except Exception as e:
@@ -135,4 +134,4 @@ if __name__ == "__main__":
 
     interactive_chat(simulation_agent_instance)
 
-    logger.info("--- Isolated SimulationAgent Test (Interactive Mode) Finished ---")
+    logger.info("--- Isolated SimulationAgent Test Finished ---")

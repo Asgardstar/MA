@@ -72,7 +72,7 @@ class SimulationAgent:
         self.agent_executor = AgentExecutor(
             agent=self.agent,
             tools=self.tools,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
             max_iterations=10,
             return_intermediate_steps=True

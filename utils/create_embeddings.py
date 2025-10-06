@@ -1,20 +1,16 @@
 from dotenv import load_dotenv
-
 load_dotenv()
+import os
 from sentence_transformers import SentenceTransformer
 import neo4j
 from neo4j import Query
-from utils.utils import load_config
-
-import os
-password = os.getenv("NEO4J_ADMIN")
+from utils import load_config
 
 # Load configuration
 config = load_config()
-neo4j_config = config.get("neo4j", {})
-uri = neo4j_config.get("uri", "")
-auth = (neo4j_config.get("username", ""), password)
-db_name = neo4j_config.get("database", "")
+uri = os.getenv("NEO4J_URL")
+auth = (os.getenv("NEO4J_ADMIN_USERNAME"), os.getenv("NEO4J_ADMIN_PASSWORD"))
+db_name = os.getenv("NEO4J_DATABASE")
 
 # Get embedding configuration
 embedding_config = config.get("embedding", {})
@@ -35,23 +31,32 @@ def main():
 
     with driver.session(database=db_name) as session:
         # Find nodes with description property
-        result = session.run(
-            'MATCH (n) WHERE n.description IS NOT NULL RETURN elementId(n) as elementId, n.description AS description, n.name AS name')
+        # Run a single query to fetch all relevant node data
+        result = session.run('MATCH (n) RETURN elementId(n) as elementId, n.name AS name, n.description AS description')
+        print(result)
+
+        nodes_with_embeddings = []
+
         for record in result:
             node_id = record.get('elementId')
-            name = record.get('name')
+            name = record.get('name') or ''
             description = record.get('description')
 
+            # Choose text to encode
+            if description:
+                text_to_encode = f"Name: {name}\nDescription: {description}"
+            else:
+                text_to_encode = f"Name: {name}"
+
             # Create embedding
-            if description is not None:
-                text_to_encode = f"Name: {name or ''}\nDescription: {description}"
-                embedding = model.encode(text_to_encode).tolist()
-                nodes_with_embeddings.append({
-                    'elementId': node_id,
-                    'name': name,
-                    'description': description,
-                    'embedding': embedding
-                })
+            embedding = model.encode(text_to_encode).tolist()
+
+            nodes_with_embeddings.append({
+                'elementId': node_id,
+                'name': name,
+                'description': description,
+                'embedding': embedding
+            })
 
             # Import when a batch has embeddings ready; flush buffer
             if len(nodes_with_embeddings) == batch_size:
@@ -62,7 +67,6 @@ def main():
         # Flush last batch
         if nodes_with_embeddings:
             import_batch(driver, nodes_with_embeddings, batch_n)
-
 
 
     # Import complete, show counters
@@ -89,7 +93,6 @@ def import_batch(driver, nodes_with_embeddings, batch_n):
 
     driver.execute_query(
         update_query,
-        #parameters={"nodes": nodes_with_embeddings},
         nodes = nodes_with_embeddings,
         database_=db_name
     )

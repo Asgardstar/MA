@@ -26,10 +26,10 @@ if __name__ == "__main__":
 
     SIMULINK_MODEL_FILE_NAME = "motor_speed_model.slx"
 
-    SIMULINK_MODELS_DIRECTORY = r"C:\Users\Duan\OneDrive - Students RWTH Aachen University\Simulink Models"
+    SIMULINK_MODELS_DIRECTORY = r"D:\OneDrive - Students RWTH Aachen University\MATLAB Models"
     
     INPUT_PARAMETERS = {
-        "Voltage_V": 20.0,
+        "Voltage_V": 30.0,
         "Load_Torque_Nm": 0.02,
         "motor_Kt": 0.1,
         "motor_Ke": 0.1,

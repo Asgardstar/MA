@@ -75,6 +75,7 @@ class MatlabModelManager:
 # --- Step 3: Create Server and Model Manager Instance ---
 mcp = FastMCP(
     " Vehicle Power Calculator",
+    port=8002
 )
 # Create a single instance of our manager.
 model_manager = MatlabModelManager(eng)

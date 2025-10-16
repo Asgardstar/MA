@@ -1,163 +1,146 @@
-from typing import Dict, Any, List
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain_core.messages import AIMessage
-from models.llm import get_llm
-from prompts.simulation_agent_prompt import SIMULATION_AGENT_PROMPT
-from langchain.tools import Tool
-from tools.simulation.access_models import access_all_simulation_models
-from tools.simulation.execute_simulation import execute_single_simulation
+
 import logging
 import json
+from typing import Dict, Any, List
+
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain_core.messages import AIMessage
+from langchain_core.tools import Tool
+
+from models.simulation_schemas import ExecutionPayload
+from pydantic import ValidationError
+
+from models.llm import get_llm
+from prompts.simulation_agent_prompt import SIMULATION_AGENT_PROMPT
+from tools.simulation.access_models import access_all_simulation_models
+from tools.simulation.execute_simulation import execute_single_simulation
 
 logger = logging.getLogger(__name__)
 
+# --- Python Function Implementation  ---
+def execute_matlab_simulink_model_implementation(payload_str: str) -> Dict[str, Any]: 
+    """
+    Use this tool to execute a specific Simulink model OR to validate parameters.
+    The input for this tool MUST be a valid JSON STRING.
+    This JSON string must represent an object structured as follows:
+    '{
+        "simulations": [
+            {
+                "model_id": "your_chosen_model_id",
+                "inputs": {"parameter_name": "parameter_value"}
+            }
+        ],
+        "confirmed": false
+    }'
+    Set 'confirmed' to false for initial validation or if inputs are partial.
+    If validation (done by the tool) fails due to missing inputs, the tool's observation will indicate this.
+    Your next step then is to ASK THE USER for these specific missing inputs.
+    Only when all inputs are present and confirmed by the user, set 'confirmed' to true to run the simulation.
+    """
+    logger.info(f"Executing 'execute_matlab_simulink_model_implementation' with raw payload_str: {payload_str}")
+    payload_dict = None
+    try:
+        payload_dict = json.loads(payload_str)
+        logger.info(f"Successfully parsed payload_str to dict: {payload_dict}")
+        payload = ExecutionPayload.model_validate(payload_dict)
+        logger.info(f"Successfully validated dict with ExecutionPayload: {payload}")
+        return execute_single_simulation(payload.model_dump())
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid JSON string provided. Error: {e}. Input: '{payload_str}'"
+        logger.error(error_msg)
+        return {"status": "error", "message": error_msg, "output_data": {"error_details": error_msg}}
+    except ValidationError as e:
+        error_details_list = e.errors()
+        error_msg = f"Invalid payload structure. Errors: {json.dumps(error_details_list, indent=2)}. Input: '{payload_str}', Parsed: {payload_dict if payload_dict is not None else 'JSON parse fail'}"
+        logger.error(error_msg)
+        return {"status": "validation_failed", "message": "Payload validation failed.", "error_details_pydantic": error_details_list, "confirmation_required": True}
+    except Exception as e:
+        error_msg = f"Unexpected error in tool. Error: {type(e).__name__} - {e}. Input: '{payload_str}'"
+        logger.error(error_msg, exc_info=True)
+        return {"status": "error", "message": error_msg, "output_data": {"error_details": error_msg}}
+# --- End Python Function Implementation ---
 
 class SimulationAgent:
     def __init__(self):
-        # Initialize LLM specifically for simulation agent
         self.llm = get_llm("simulationagent")
         self.tools = self._create_tools()
-        self.agent = self._create_agent()
-        self.agent_executor = self._create_executor()
-
-    def _create_tools(self):
-        """Create tools for the simulation agent"""
-
-        # Wrapper function to make access_all_simulation_models accept an argument
-        def access_models_wrapper(dummy_input: str = ""):
-            """Wrapper to make access_all_simulation_models work as a tool"""
-            return access_all_simulation_models()
-
-        tools = [
-            Tool(
-                name="access_simulation_models",
-                func=access_models_wrapper,
-                description="""
-                Access all simulation models in the knowledge graph.
-                Returns information for each model including:
-                - Model description (purpose, scope, fidelity)
-                - Required inputs and outputs
-                - Current inputs/outputs stored in the knowledge graph
-                - Input/output details (name, description, format, values, units)
-                No input required - just call this tool to get all models.
-                """
-            ),
-            Tool(
-                name="execute_simulation",
-                func=lambda x: execute_single_simulation(json.loads(x)),
-                description="""
-                Execute one or more single simulations.
-                Input should be a JSON string with:
-                {
-                    "simulations": [
-                        {
-                            "model_id": "string",
-                            "inputs": {
-                                "input_name": value,
-                                ...
-                            }
-                        },
-                        ...
-                    ]
-                }
-                This will prompt for confirmation before execution.
-                """
-            )
-        ]
-        return tools
-
-    def _create_agent(self):
-        """Create the simulation agent"""
-        return create_react_agent(
+        self.agent = create_react_agent(
             llm=self.llm,
             tools=self.tools,
             prompt=SIMULATION_AGENT_PROMPT
         )
-
-    def _create_executor(self):
-        """Create the agent executor"""
-        return AgentExecutor(
+        self.agent_executor = AgentExecutor(
             agent=self.agent,
             tools=self.tools,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
-            max_iterations=5,
+            max_iterations=10,
             return_intermediate_steps=True
         )
 
+    def _create_tools(self) -> List[Tool]:
+        def access_models_wrapper(_: str = ""):
+            return access_all_simulation_models()
+
+        tools = [
+            Tool(
+                name="access_simulation_models_info",
+                func=access_models_wrapper,
+                description="""Use this tool to get a list of ALL available simulation models and their detailed interface definitions. The returned information for each model includes its 'id', 'name', 'description', 'fileName', and importantly, 'inputs' and 'outputs' lists. Each item in these lists is a dictionary describing a parameter (with 'name', 'description', 'dataType', 'unit', 'required' status etc.). This tool takes NO INPUT. Call it directly when you need to know about available models or a specific model's interface."""
+            ),
+          
+            Tool(
+                name="execute_matlab_simulink_model", 
+                func=execute_matlab_simulink_model_implementation, 
+                description=execute_matlab_simulink_model_implementation.__doc__, 
+            ),
+        ]
+        return tools
+
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Process the simulation request in a simplified way for tool integration"""
+        
         query = state.get("query", "")
-        context = self._build_context(state)
+        chat_history = state.get("messages", [])
 
-        try:
-            # Run the agent
-            result = self.agent_executor.invoke({
-                "input": query,
-                "context": context,
-                "chat_history": state.get("messages", [])
-            })
-
-            # Extract results
-            output = result.get("output", "")
-            intermediate_steps = result.get("intermediate_steps", [])
-
-            # Parse the results
-            simulation_results = self._parse_simulation_results(output, intermediate_steps)
-
-            logger.info("Simulation agent completed processing")
-
-            return {
-                "simulation_results": simulation_results,
-                "raw_output": output,
-                "intermediate_steps": intermediate_steps
-            }
-
-        except Exception as e:
-            logger.error(f"Error in simulation agent: {str(e)}")
-            return {
-                "error": f"Simulation error: {str(e)}",
-                "simulation_results": None
-            }
-
-    def _build_context(self, state: Dict[str, Any]) -> str:
-        """Build context from the current state"""
-        context_parts = []
-
-        if state.get("search_results"):
-            context_parts.append(f"Search Results: {json.dumps(state['search_results'], indent=2)}")
-
-        if state.get("user_inputs"):
-            context_parts.append(f"User Inputs: {json.dumps(state['user_inputs'], indent=2)}")
-
-        return "\n\n".join(context_parts)
-
-    def _parse_simulation_results(self, output: str, intermediate_steps: list) -> Dict[str, Any]:
-        """Parse simulation results from the agent output"""
-        results = {
-            "raw_output": output,
-            "models_accessed": [],
-            "executions": [],
-            "summary": ""
+        agent_input = {
+            "input": query,
+            "chat_history": chat_history,
+            "context": json.dumps(state.get("search_results", {})) if state.get("search_results") else ""
         }
 
-        # Extract results from intermediate steps
-        for step in intermediate_steps:
-            if isinstance(step, tuple) and len(step) == 2:
-                action, observation = step
-                if action.tool == "access_simulation_models":
-                    results["models_accessed"].append(observation)
-                elif action.tool == "execute_simulation":
-                    results["executions"].append({
-                        "type": "single_simulation",
-                        "result": observation
-                    })
+        logger.info(f"SimulationAgent processing with input: {agent_input}")
+        try:
+            result = self.agent_executor.invoke(agent_input)
+            final_answer = result.get("output", "I am not sure how to respond to that regarding simulations.")
+            intermediate_steps = result.get("intermediate_steps", [])
+            raw_execution_results = None
 
-        # Extract summary from output
-        if "summary:" in output.lower():
-            summary_start = output.lower().find("summary:") + 8
-            results["summary"] = output[summary_start:].strip()
-        else:
-            results["summary"] = output.strip()
-
-        return results
+            if intermediate_steps:
+                last_action, last_observation = intermediate_steps[-1]
+                if last_action.tool == "execute_matlab_simulink_model": 
+                    raw_execution_results = last_observation
+            
+            return {
+                "final_answer": final_answer,
+                "raw_output_from_agent_executor": result,
+                "simulation_results_if_any": raw_execution_results
+            }
+        except Exception as e:
+            logger.error(f"Error in SimulationAgent process: {str(e)}", exc_info=True)
+            error_message = str(e)
+            if isinstance(e, ValidationError):
+                 error_details = e.errors()
+                 error_message = f"Pydantic Validation Error: {json.dumps(error_details, indent=2)}"
+            elif hasattr(e, 'errors') and callable(e.errors):
+                try:
+                    error_dict_list = e.errors()
+                    if isinstance(error_dict_list, list):
+                        error_message = f"Pydantic Validation Error: {json.dumps(error_dict_list, indent=2)}"
+                    else:
+                        error_message = f"Pydantic Validation Error (non-standard): {str(error_dict_list)}"
+                except Exception as json_e:
+                    logger.error(f"Could not serialize Pydantic error to JSON: {json_e}")
+            return {
+                "final_answer": f"An error occurred in the Simulation Agent: {error_message}",
+                "error": error_message
+            }

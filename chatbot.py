@@ -54,7 +54,7 @@ with col1:
             with st.spinner('Engineering...'):
                 try:
                     # Get response from multi-agent system
-                    result = st.session_state.multi_agent_system.run(prompt)
+                    result = st.session_state.multi_agent_system.run(st.session_state.messages)
 
                     # Display the response
                     response = result.get("response", "We couldn't process your request. AI won't replace you yet.")

@@ -1,23 +1,25 @@
-# mcp_server.py (Stateful Version)
 
 import matlab.engine
 import sys
 from mcp.server.fastmcp import FastMCP
 from typing import Union, Dict, Any
+import os
+from dotenv import load_dotenv
 
-# --- Step 1: Start MATLAB Engine ---
-# This part remains the same.
+load_dotenv()
+
+# Start MATLAB Engine ---
 print("Starting MATLAB engine... This may take a moment.")
 try:
     eng = matlab.engine.start_matlab()
-    matlab_script_path = r'D:\OneDrive - Students RWTH Aachen University\MATLAB Models'
+    matlab_script_path = os.environ.get("MOTOR_SPEED_MODEL_PATH")
     eng.addpath(matlab_script_path, nargout=0)
     print("MATLAB engine started successfully.")
 except Exception as e:
     print(f"Fatal: Could not start MATLAB engine. {e}", file=sys.stderr)
     sys.exit(1)
 
-# --- Step 2: Define the Stateful Wrapper Class ---
+# Define the Stateful Wrapper Class ---
 class MatlabModelManager:
     """
     A class to manage the state of the MATLAB model parameters.
@@ -72,20 +74,19 @@ class MatlabModelManager:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-# --- Step 3: Create Server and Model Manager Instance ---
+# Create Server and Model Manager Instance ---
 mcp = FastMCP(
     " Vehicle Power Calculator",
     port=8002
 )
-# Create a single instance of our manager.
 model_manager = MatlabModelManager(eng)
 
 
-# --- Step 4: Create MCP Tools that Use the Manager ---
+# Create MCP Tools that Use the Manager ---
 
 @mcp.tool()
 def get_all_parameters() -> Dict[str, float]:
-    """Query all current model parameters and their values."""
+    """Query all current model parameters and their values of the motor speed model."""
     return model_manager.get_all_parameters()
 
 from typing import Any, Dict, List, Optional
@@ -103,7 +104,7 @@ def set_vehicle_parameters(
     air_density_kgm3: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Sets one or more vehicle model parameters in a single call.
+    Sets one or more vehicle model parameters of the motor speed model in a single call.
 
     Args:
         speed_kph: Vehicle speed in kilometers per hour (km/h).
@@ -151,57 +152,11 @@ def set_vehicle_parameters(
 
     return results
 
-'''
-@mcp.tool()
-def set_vehicle_speed(speed_kph: float) -> Dict[str, Any]:
-    """Sets the vehicle speed in km/h."""
-    return model_manager.set_parameter('vehicle_speed_kph', speed_kph)
-
-@mcp.tool()
-def set_road_grade(grade_percent: float) -> Dict[str, Any]:
-    """Sets the road grade in percent."""
-    return model_manager.set_parameter('road_grade_percent', grade_percent)
-
-@mcp.tool()
-def set_vehicle_mass(mass_kg: float) -> Dict[str, Any]:
-    """Sets the vehicle mass in kg."""
-    return model_manager.set_parameter('vehicle_mass_kg', mass_kg)
-
-@mcp.tool()
-def set_drag_coefficient(coeff: float) -> Dict[str, Any]:
-    """Sets the aerodynamic drag coefficient."""
-    return model_manager.set_parameter('drag_coeff', coeff)
-
-@mcp.tool()
-def set_frontal_area(area_m2: float) -> Dict[str, Any]:
-    """Sets the vehicle's frontal area in square meters (m^2)."""
-    return model_manager.set_parameter('frontal_area_m2', area_m2)
-
-@mcp.tool()
-def set_rolling_resistance_coeff(coeff: float) -> Dict[str, Any]:
-    """Sets the rolling resistance coefficient."""
-    return model_manager.set_parameter('rolling_res_coeff', coeff)
-
-@mcp.tool()
-def set_powertrain_efficiency(efficiency: float) -> Dict[str, Any]:
-    """Sets the powertrain efficiency (e.g., 0.9 for 90%)."""
-    return model_manager.set_parameter('powertrain_eff', efficiency)
-
-@mcp.tool()
-def set_gravity(g_ms2: float) -> Dict[str, Any]:
-    """Sets the acceleration due to gravity in m/s^2."""
-    return model_manager.set_parameter('g', g_ms2)
-
-@mcp.tool()
-def set_air_density(rho_kgm3: float) -> Dict[str, Any]:
-    """Sets the air density in kg/m^3."""
-    return model_manager.set_parameter('rho', rho_kgm3)
-'''
 
 @mcp.tool()
 def run_calculation() -> Dict[str, Any]:
     """
-    Runs the power calculation using the currently set parameters.
+    Runs the power calculation of the motor speed model using the currently set parameters.
     
     Make sure to set your desired parameters using the 'set_...' tools
     before running this calculation.

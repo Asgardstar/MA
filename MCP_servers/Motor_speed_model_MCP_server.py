@@ -12,7 +12,7 @@ load_dotenv()
 print("Starting MATLAB engine... This may take a moment.")
 try:
     eng = matlab.engine.start_matlab()
-    matlab_script_path = os.environ.get("MOTOR_SPEED_MODEL_PATH")
+    matlab_script_path = r'D:\OneDrive - Students RWTH Aachen University\MATLAB Models'
     eng.addpath(matlab_script_path, nargout=0)
     print("MATLAB engine started successfully.")
 except Exception as e:
@@ -30,13 +30,13 @@ class MatlabModelManager:
         self.eng = matlab_engine
         # Store all model parameters with default values.
         self.parameters = {
-            'vehicle_speed_kph': 1,
-            'road_grade_percent': 1,
-            'vehicle_mass_kg': 1,
-            'drag_coeff': 1,
-            'frontal_area_m2': 1,
-            'rolling_res_coeff': 1,
-            'powertrain_eff':1,
+            'vehicle_speed_kph': 1.0,
+            'road_grade_percent': 1.0,
+            'vehicle_mass_kg': 1.0,
+            'drag_coeff': 1.0,
+            'frontal_area_m2': 1.0,
+            'rolling_res_coeff': 1.0,
+            'powertrain_eff':1.0,
             'g': 9.81,
             'rho': 1.225
         }
@@ -157,9 +157,7 @@ def set_vehicle_parameters(
 def run_calculation() -> Dict[str, Any]:
     """
     Runs the power calculation of the motor speed model using the currently set parameters.
-    
-    Make sure to set your desired parameters using the 'set_...' tools
-    before running this calculation.
+    Get the output electric power with given parameters
     """
     return model_manager.run_calculation()
 

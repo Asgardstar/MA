@@ -25,7 +25,7 @@ async def main():
     llm = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
 
     # Connect to the MCP server using a clean 'async with' block
-    async with streamablehttp_client("http://localhost:8002/mcp") as (
+    async with streamablehttp_client("http://localhost:8003/mcp") as (
         read_stream,
         write_stream,
         _,

@@ -1,4 +1,3 @@
-# tools/mcp_tools.py
 import asyncio
 import os
 import json
@@ -17,42 +16,40 @@ load_dotenv()
 
 async def run_mcp_client(query: str) -> str:
     """
-    Connects to two specific MCP servers, combines their tools,
+    Connects to three specific MCP servers, combines their tools,
     uses a LangChain LLM to decide on a tool call, executes it on the correct
     server, and returns the final response.
     """
     final_response = "No response from AI."
     messages: List[Any] = []
 
-    # Define the fixed list of MCP server URLs.
+    # Define the fixed list of three MCP server URLs.
     mcp_server_urls = [
         "http://localhost:8001/mcp",
-        "http://localhost:8002/mcp"
+        "http://localhost:8002/mcp",
+        "http://localhost:8003/mcp" 
     ]
-    # This will hold all tools from all servers for LangChain.
     all_langchain_tools = []
-    # This dictionary will map a tool name to the correct server session.
     tool_to_session_map: Dict[str, ClientSession] = {}
-
 
     try:
         llm = get_llm("mcpagent")
 
-
+        # Extend the 'async with' block to handle three connections.
         async with streamablehttp_client(mcp_server_urls[0]) as streams1, \
-                   streamablehttp_client(mcp_server_urls[1]) as streams2:
+                     streamablehttp_client(mcp_server_urls[1]) as streams2, \
+                     streamablehttp_client(mcp_server_urls[2]) as streams3:
             
             async with ClientSession(streams1[0], streams1[1]) as session1, \
-                       ClientSession(streams2[0], streams2[1]) as session2:
+                       ClientSession(streams2[0], streams2[1]) as session2, \
+                       ClientSession(streams3[0], streams3[1]) as session3:
 
-
-                sessions = [session1, session2]
+                sessions = [session1, session2, session3]
                 for session in sessions:
                     await session.initialize()
                     tool_info = await session.list_tools()
                     
                     for tool in tool_info.tools:
-                        # Add the tool to the master list for the LLM.
                         all_langchain_tools.append({
                             "type": "function",
                             "function": {
@@ -61,10 +58,8 @@ async def run_mcp_client(query: str) -> str:
                                 "parameters": tool.inputSchema,
                             },
                         })
-                        # Map the tool name to its corresponding session.
                         tool_to_session_map[tool.name] = session
 
-                # Bind the combined list of all tools to the LLM.
                 llm_with_tools = llm.bind_tools(all_langchain_tools)
 
                 messages.append(HumanMessage(content=query))
@@ -76,13 +71,19 @@ async def run_mcp_client(query: str) -> str:
                         tool_name = tool_call['name']
                         tool_args = tool_call['args']
                         
-                        # Look up the correct session from our routing map.
                         session_to_use = tool_to_session_map.get(tool_name)
                         
                         if session_to_use:
-                            # Call the tool using the correct session.
                             tool_result = await session_to_use.call_tool(tool_name, tool_args)
-                            tool_output = " ".join(str(item) for item in tool_result.content)
+                            
+                            # Improved handling for the tool output
+                            if tool_result.content:
+                                if isinstance(tool_result.content[0], dict):
+                                    tool_output = json.dumps(tool_result.content[0])
+                                else:
+                                    tool_output = " ".join(str(item) for item in tool_result.content)
+                            else:
+                                tool_output = "Tool executed but returned no content."
                         else:
                             tool_output = f"Error: Tool '{tool_name}' not found on any connected server."
 
@@ -110,7 +111,6 @@ async def run_mcp_client(query: str) -> str:
 def mcp_chat_tool(query: str) -> str:
     """
     A synchronous wrapper for the asynchronous run_mcp_client function.
-    No changes needed here.
     """
     try:
         return asyncio.run(run_mcp_client(query))

@@ -17,25 +17,25 @@
   },
   "llm_supervisor": {
     "provider": "google",
-    "model": "gemini-2.0-flash",
+    "model": "gemini-2.5-flash",
     "temperature": 0.2,
     "max_tokens": null
   },
   "llm_searchagent": {
     "provider": "google",
-    "model": "gemini-2.0-flash",
+    "model": "gemini-2.5-flash",
     "temperature": 0.2,
     "max_tokens": null
   },
   "llm_simulationagent": {
     "provider": "google",
-    "model": "gemini-2.0-flash",
+    "model": "gemini-2.5-flash",
     "temperature": 0.2,
     "max_tokens": null
   },
   "llm_mcpagent": {
   "provider": "google",
-  "model": "gemini-2.0-flash",
+  "model": "gemini-2.5-flash",
   "temperature": 0.2,
   "max_tokens": null
   },

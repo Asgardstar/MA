@@ -13,7 +13,7 @@ config = load_config()
 def get_llm(agent):
     """Get LLM instance for a specific agent"""
     # Construct the config key based on agent name
-    config_key = f"llm_{agent}" if agent in ["supervisor", "searchagent", "simulationagent"] else None
+    config_key = f"llm_{agent}" if agent in ["supervisor", "searchagent", "simulationagent","mcpagent"] else None
 
     if not config_key or config_key not in config:
         raise ValueError(f"Invalid agent type: {agent}")

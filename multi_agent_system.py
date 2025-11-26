@@ -11,6 +11,7 @@ import json
 from models.llm import get_llm
 from agents.search_agent import SearchAgent
 from agents.simulation_agent import SimulationAgent
+from agents.mcp_agent import MCPAgent
 from tools.live_feedback import LiveFeedback
 from utils.utils import get_session_id
 
@@ -22,6 +23,7 @@ class AgentState(MessagesState):
     query: str
     search_results: Dict[str, Any] = {}
     simulation_results: Dict[str, Any] = {}
+    mcp_results: Dict[str, Any] = {}
     final_answer: str = ""
     formatted_answer: str = ""
     feedback: List[Dict[str, Any]] = []
@@ -38,6 +40,8 @@ class SearchInput(BaseModel):
 class SimulationInput(BaseModel):
     task: str = Field(description="The simulation task description")
 
+class MCPInput(BaseModel):
+    command: str = Field(description="The command to send to the MCP server for external tool execution")
 
 class FormatInput(BaseModel):
     content: str = Field(description="The content to format")
@@ -49,6 +53,7 @@ class LangGraphMultiAgentSystem:
         # Initialize agents with proper names
         self.search_agent = SearchAgent()
         self.simulation_agent = SimulationAgent()
+        self.mcp_agent = MCPAgent()
 
         # Create tools from agents
         self.tools = self._create_tools()
@@ -81,6 +86,16 @@ class LangGraphMultiAgentSystem:
                 Input: description of the simulation task needed.
                 """,
                 args_schema=SimulationInput
+            ),
+            StructuredTool.from_function(
+                func=self._mcp_agent_tool, # Add the new tool function
+                name="execute_mcp_command",
+                description="""
+                Connect to an MCP server to execute commands on external systems like MATLAB or Modelica.
+                Use this to interact with external simulation tools that are not directly integrated.
+                Input: a natural language command for the external system.
+                """,
+                args_schema=MCPInput
             ),
             StructuredTool.from_function(
                 func=self._format_answer_tool,
@@ -166,6 +181,28 @@ class LangGraphMultiAgentSystem:
             logger.error(f"Error in simulation tool: {str(e)}")
             self.feedback.send(f"❌ Simulation error: {str(e)}", level="error")
             return f"Error running simulation: {str(e)}"
+    
+    def _mcp_agent_tool(self, command: str):
+        """Tool wrapper for mcp agent"""
+        self.feedback.send(f"📡 Sending command to MCP server: '{command}'...")
+        try:
+            result = self.mcp_agent.process({"query": command, "messages": []})
+            mcp_results = result.get("mcp_results", {})
+            if mcp_results and mcp_results.get("summary"):
+                summary = mcp_results["summary"]
+                self.feedback.send(f"✅ MCP command executed successfully. Result: {summary}")
+                self.feedback.mcp_results = mcp_results
+                return f"MCP command executed. Result: {summary}"
+            elif result.get("error"):
+                 raise Exception(result.get("error"))
+            else:
+                self.feedback.send("⚠️ MCP command returned no output.")
+                return "MCP command executed but returned no output."
+        except Exception as e:
+            logger.error(f"Error in MCP tool: {str(e)}")
+            self.feedback.send(f"❌ MCP error: {str(e)}", level="error")
+            return f"Error executing MCP command: {str(e)}"
+
 
     def _format_answer_tool(self, content: str):
         """Tool wrapper for formatting final answer"""
@@ -174,6 +211,7 @@ class LangGraphMultiAgentSystem:
         # Get all results from feedback system
         search_results = getattr(self.feedback, 'search_results', {})
         sim_results = getattr(self.feedback, 'simulation_results', {})
+        mcp_results = getattr(self.feedback, 'mcp_results', {})
 
         # Parse content if it's a JSON string
         try:
@@ -191,6 +229,10 @@ class LangGraphMultiAgentSystem:
 
         # Create formatted answer
         formatted = self._create_formatted_answer(content, search_results, sim_results)
+
+        # Append MCP results to the formatted string
+        if mcp_results and mcp_results.get("summary"):
+            formatted += f"\n\n## 📡 MCP Execution Result\n{mcp_results['summary']}"
 
         # Store the formatted answer in feedback system
         self.feedback.formatted_answer = formatted
@@ -231,59 +273,53 @@ class LangGraphMultiAgentSystem:
             state_modifier=LANGGRAPH_SUPERVISOR_PROMPT
         )
 
-    def run(self, query: str, session_id: str = None) -> Dict[str, Any]:
+    def run(self, messages: List[Dict[str, Any]], session_id: str = None) -> Dict[str, Any]:
         """Run the multi-agent system using LangGraph"""
         if not session_id:
             session_id = get_session_id()
 
-        # Initialize state - notice we now use a simple dictionary
+        # Convert the message history from dicts to LangChain message objects
+        langchain_messages = []
+        for msg in messages:
+            if msg.get("role") == "user":
+                langchain_messages.append(HumanMessage(content=msg.get("content")))
+            elif msg.get("role") == "assistant":
+                langchain_messages.append(AIMessage(content=msg.get("content")))
+        
+        # Use the latest user query from the history
+        query = langchain_messages[-1].content if langchain_messages else ""
+
+        # Initialize state with the full message history
         initial_state = {
-            "messages": [HumanMessage(content=query)],
+            "messages": langchain_messages,
             "query": query,
             "session_id": session_id,
-            "search_results": {},
-            "simulation_results": {},
-            "formatted_answer": "",
-            "feedback": [],
-            "intermediate_steps": []
         }
 
         try:
             self.feedback.send(f"🚀 Processing query: {query}")
 
             # Clear previous results from feedback system
-            if hasattr(self.feedback, 'search_results'):
-                delattr(self.feedback, 'search_results')
-            if hasattr(self.feedback, 'simulation_results'):
-                delattr(self.feedback, 'simulation_results')
-            if hasattr(self.feedback, 'formatted_answer'):
-                delattr(self.feedback, 'formatted_answer')
+            for attr in ['search_results', 'simulation_results', 'mcp_results', 'formatted_answer']:
+                if hasattr(self.feedback, attr):
+                    delattr(self.feedback, attr)
 
             # Run supervisor with ReAct agent
             result = self.supervisor.invoke(initial_state)
 
             # Extract final answer
-            final_response = getattr(self.feedback, 'formatted_answer', "")
+            final_answer_obj = result.get("messages", [])[-1]
+            final_response = final_answer_obj.content if final_answer_obj else "I couldn't generate a response."
 
-            if not final_response:
-                # Try to extract from messages if formatted_answer not set
-                for msg in reversed(result.get("messages", [])):
-                    if isinstance(msg, AIMessage):
-                        final_response = msg.content
-                        break
-
-            if not final_response:
-                final_response = "I couldn't generate a response. Please try rephrasing your question."
-
-            # Get the stored results
-            search_results = getattr(self.feedback, 'search_results', {})
-            simulation_results = getattr(self.feedback, 'simulation_results', {})
-
+            # Use the formatted answer if available
+            final_response = getattr(self.feedback, 'formatted_answer', final_response)
+            
             return {
                 "response": final_response,
                 "feedback": self.feedback.get_all(),
-                "search_results": search_results,
-                "simulation_results": simulation_results,
+                "search_results": getattr(self.feedback, 'search_results', {}),
+                "simulation_results": getattr(self.feedback, 'simulation_results', {}),
+                "mcp_results": getattr(self.feedback, 'mcp_results', {}),
                 "error": None
             }
 
@@ -294,7 +330,7 @@ class LangGraphMultiAgentSystem:
                 "feedback": self.feedback.get_all(),
                 "error": str(e)
             }
-
+        
     def _format_error_message(self, error: str) -> str:
         """Format error messages for users"""
         return f"""

@@ -23,23 +23,17 @@ mod = ModelicaSystem(model_path, model_name)
 #query the parameters
 @mcp.tool()
 def query_parameters():
-    """Query all the current parameters"""
+    """
+    Queries and returns all current input parameters and their values for the Battery Thermal Model.
+    """
     parameters = mod.getParameters()
     return parameters
 
 @mcp.tool()
 def query_specific_parameters(specific_parameter:str):
     """
-    Query one of the current parameters
-    the parameters must be one of the eight parameters:
-    A (Surface Area),
-    P_electric (Electric Power Output from battery),
-    R_ref (Reference Resistance),
-    T_ambient_C (Ambient Temperature in Celsius),
-    T_ref (Reference Temperature),
-    V_ocv (Open Circuit Voltage),
-    alpha (Temperature Coefficient of Resistance),
-    h (Heat Transfer Coefficient)
+    Queries and returns the value of a single specified parameter from the Battery Thermal Model.
+    Valid parameters are: A, P_electric, R_ref, T_ambient_C, T_ref, V_ocv, alpha, h.
     """
     parameter_value = mod.getParameters(specific_parameter)
     return parameter_value
@@ -58,17 +52,16 @@ def set_parameters(
 
 ):
     """
-    Set the model parameters.
-
+    Sets one or more input parameters for a future simulation of the Battery Thermal Model.
+    
     Args:
-    T_C_value (Ambient Temperature in Celsius),
-    V_ocv_value (Open Circuit Voltage),
-    h_value (Heat Transfer Coefficient),
-    A_value (Surface Area),
-    R_ref_value (Reference Resistance),
-    alpha_value (Temperature Coefficient of Resistance),
-    T_ref_K_value (Reference Temperature), 
-
+        T_C_value (float): Ambient Temperature in Celsius.
+        V_ocv_value (float): Open Circuit Voltage in Volts.
+        h_value (float): Heat Transfer Coefficient.
+        A_value (float): Surface Area.
+        R_ref_value (float): Reference Resistance in Ohms.
+        alpha_value (float): Temperature Coefficient of Resistance.
+        T_ref_K_value (float): Reference Temperature in Kelvin.
     """
     if T_C_value is not None:
         mod.setParameters(f"T_ambient_C={T_C_value}")
@@ -85,53 +78,18 @@ def set_parameters(
     if T_ref_K_value is not None:
         mod.setParameters(f"T_ref={T_ref_K_value}")
 
-'''
-@mcp.tool()
-def set_ambient_temperature(T_C_value: float):
-    """Sets the ambient temperature in Celsius for the EV cell."""
-    mod.setParameters(f"T_ambient_C={T_C_value}")
-
-@mcp.tool()
-def set_open_circuit_voltage(V_ocv_value: float):
-    """Sets the open-circuit voltage (OCV) of the cell."""
-    mod.setParameters(f"V_ocv={V_ocv_value}")
-
-@mcp.tool()
-def set_heat_transfer_coefficient(h_value: float):
-    """Sets the equivalent heat transfer coefficient (cooling system effectiveness)."""
-    mod.setParameters(f"h={h_value}")
-
-@mcp.tool()
-def set_surface_area(A_value: float):
-    """Sets the heat dissipation surface area of the cell."""
-    mod.setParameters(f"A={A_value}")
-
-@mcp.tool()
-def set_reference_resistance(R_ref_value: float):
-    """Sets the reference internal resistance at the reference temperature."""
-    mod.setParameters(f"R_ref={R_ref_value}")
-
-@mcp.tool()
-def set_resistance_temp_coeff(alpha_value: float):
-    """Sets the temperature coefficient of resistance."""
-    mod.setParameters(f"alpha={alpha_value}")
-
-@mcp.tool()
-def set_reference_temperature(T_ref_K_value: float):
-    """Sets the reference temperature of battery resistance in Kelvin."""
-    mod.setParameters(f"T_ref={T_ref_K_value}")
-'''
 #run the simulation and give results
 @mcp.tool()
 def simulate_battery_steady_state(power_output: float) -> dict[str, float]:
     """
-    Runs a steady-state thermal simulation for the EV battery model.
+    Calculates the steady-state temperature and/or the internal resistance of the battery by running a thermal simulation.
+    Use this tool when asked to find, calculate, or determine the battery's temperature for a given power output.
 
-    This tool sets a new power output value, runs the simulation, and returns
-    the final steady-state results for temperature and internal resistance.
-
-    :param power_output: The desired continuous power output in Watts (W).
-    :return: A dictionary containing the final temperature in Celsius and the internal resistance in Ohms.
+    Args:
+        power_output (float): The continuous electric power output in Watts (W) to be used for the simulation.
+    
+    Returns:
+        A dictionary containing the final steady-state temperature in Celsius and the internal resistance in Ohms.
     """
     mod.setParameters(f"P_electric={power_output}")
     

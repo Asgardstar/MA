@@ -14,7 +14,6 @@ import os
 logger = logging.getLogger(__name__)
 
 # Get the configuration
-NEO4J_ADMIN = os.getenv('NEO4J_ADMIN')
 config = load_config()
 neo4j_config = config.get("neo4j", {})
 neo4j_agent_config = config.get("neo4j_agent", {})
@@ -24,9 +23,9 @@ rag_config = config.get("rag", {})
 def semantic_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Perform semantic search on the knowledge graph using the user query"""
     # Get configuration
-    uri = neo4j_config.get("uri", "")
-    auth = (neo4j_config.get("username", ""), NEO4J_ADMIN)
-    db_name = neo4j_config.get("database", "")
+    uri = os.getenv("NEO4J_URL")
+    auth = (os.getenv("NEO4J_ADMIN_USERNAME"), os.getenv("NEO4J_ADMIN_PASSWORD"))
+    db_name = os.getenv("NEO4J_DATABASE")
 
     # Get similarity threshold from config
     similarity_threshold = rag_config.get("similarity_threshold", 0.7)

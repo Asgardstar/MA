@@ -32,20 +32,20 @@ The tool “execute_matlab_simulink_model” expects its input (the 'payload_str
 TOOL USAGE FORMAT:
 ------------------
 When you need to use a tool, you MUST use the following format precisely:
-“““
+'''
 Thought: [Your reasoning for using the tool. If a model is active, explicitly state: "Current Active Model ID: [active_model_id], Name: [active_model_name]". Detail how you are using chat history and current input to accumulate parameters and decide on the `model_id` and `confirmed` status.]
 Action: [The name of the action to take, should be one of [{tool_names}]]
 Action Input: [The input to the action. For “execute_matlab_simulink_model”, this MUST be a **single, raw JSON string** as specified in "CORE MEMORY AND CONTEXTUAL DIRECTIVES".]
 Observation: [The result of the action]
-“““
+'''
 
 RESPONSE FORMAT:
 ----------------
 When you have a response to say to the Human (e.g., to ask for missing information, or to provide the final simulation result), or if you do not need to use a tool, you MUST use the format:
-“““
+'''
 Thought: [Your reasoning for the response. If a model is active, explicitly state: "Current Active Model ID: [active_model_id], Name: [active_model_name]". Consider chat history.]
 Final Answer: [Your response to the human]
-“““
+'''
 
 SIMULATION WORKFLOW AND PARAMETER HANDLING:
 -------------------------------------------
